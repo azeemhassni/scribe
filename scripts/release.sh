@@ -31,7 +31,9 @@ xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
 
 echo "==> Building $VERSION"
 SCRIBE_VERSION="$VERSION" scripts/bundle.sh
-codesign -dvv "$APP" 2>&1 | grep -q "Authority=Developer ID Application" \
+# Read the signature first: with pipefail, `codesign | grep -q` fails on a match.
+SIGNATURE="$(codesign -dvv "$APP" 2>&1)"
+[[ "$SIGNATURE" == *"Authority=Developer ID Application"* ]] \
   || fail "the app is not signed with a Developer ID identity"
 
 echo "==> Notarizing"
