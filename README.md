@@ -43,6 +43,8 @@ scripts/bundle.sh
 cp -R build/Scribe.app /Applications/
 ```
 
+To change the icon, edit `Resources/AppIcon.svg` and run `scripts/icon.sh` (needs `brew install librsvg`).
+
 The build is signed with the first Developer ID identity in your keychain. Without one it is signed ad-hoc, and macOS asks for microphone access again after every rebuild.
 
 Check an install:
