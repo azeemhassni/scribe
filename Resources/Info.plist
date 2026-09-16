@@ -4,6 +4,7 @@
 <dict>
     <key>CFBundleName</key>                  <string>Scribe</string>
     <key>CFBundleDisplayName</key>           <string>Scribe</string>
+    <key>CFBundleIconFile</key>          <string>AppIcon</string>
     <key>CFBundleExecutable</key>            <string>Scribe</string>
     <key>CFBundleIdentifier</key>            <string>com.azeemhassni.scribe</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>

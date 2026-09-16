@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#f6f4ef" filter="url(#shadow)"/>
+  <!-- Ink edge, so the off-white body holds its shape on white and light grey windows. -->
+  <rect x="104.5" y="104.5" width="815" height="815" rx="180.5" fill="none" stroke="#16160f" stroke-opacity="0.2" stroke-width="9"/>
+  <!-- Artwork at 90% about the centre, sitting 7px right of it: the ragged right
+       edge of the lines makes a geometrically centred group read left-heavy. -->
+  <g transform="translate(512 512) scale(0.9) translate(-518 -512)">
+  <g fill="#16160f">
+    <rect x="217" y="442" width="44" height="140" rx="22"/>
+    <rect x="287" y="352" width="44" height="320" rx="22"/>
+    <rect x="357" y="292" width="44" height="440" rx="22"/>
+    <rect x="427" y="392" width="44" height="240" rx="22"/>
+    <rect x="535" y="364" width="300" height="44" rx="22"/>
+    <rect x="535" y="448" width="250" height="44" rx="22"/>
+    <rect x="535" y="532" width="280" height="44" rx="22"/>
+  </g>
+  <rect x="535" y="616" width="180" height="44" rx="22" fill="#1a46e0"/>
+  </g>
+</svg>
