@@ -109,6 +109,7 @@ struct MenuContent: View {
     @EnvironmentObject var library: MeetingLibrary
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var updater = AppUpdater.shared
 
 
     var body: some View {
@@ -268,6 +269,8 @@ struct MenuContent: View {
             Button("Open library") { LibraryWindow.open(openWindow) }
             Button("Log") { controller.openLog() }
             Spacer()
+            Button("Updates…") { AppUpdater.shared.checkForUpdates() }
+                .disabled(!updater.canCheckForUpdates)
             Button("Setup…") { SetupWindow.open(openWindow) }
             Button("Settings…") { SettingsWindow.open(openSettings) }
             Button("Quit") { NSApplication.shared.terminate(nil) }
@@ -310,6 +313,18 @@ struct PreferencesView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Divider()
+
+            Toggle("Check for updates automatically", isOn: Binding(
+                get: { AppUpdater.shared.automaticallyChecks },
+                set: { AppUpdater.shared.automaticallyChecks = $0 }))
+            HStack {
+                Text("Version \(AppUpdater.currentVersion)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Check now") { AppUpdater.shared.checkForUpdates() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
 
             Toggle("Start Scribe at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in

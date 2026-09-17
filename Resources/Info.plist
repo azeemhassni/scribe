@@ -11,6 +11,9 @@
     <key>CFBundleShortVersionString</key>    <string>1.0</string>
     <key>CFBundleVersion</key>               <string>1</string>
     <key>LSMinimumSystemVersion</key>        <string>14.4</string>
+    <key>SUFeedURL</key>                     <string>https://github.com/azeemhassni/scribe/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>                 <string>HrV/quzS/qRxIBwQsXGOG0QYH6TMjDVTlAGUhcW9Mng=</string>
+    <key>SUEnableAutomaticChecks</key>       <true/>
     <key>LSUIElement</key>                   <true/>
     <key>NSHighResolutionCapable</key>       <true/>
     <key>NSMicrophoneUsageDescription</key>

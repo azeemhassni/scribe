@@ -32,6 +32,7 @@ final class ScribeController: ObservableObject {
     // MARK: - Startup
 
     func bootstrap() {
+        _ = AppUpdater.shared
         applyDetectorSettings()
 
         Task {
