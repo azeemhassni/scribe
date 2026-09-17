@@ -115,7 +115,8 @@ struct SetupView: View {
             StepRow(title: "Markdown export",
                     subtitle: "Optional. Mirror each meeting into an Obsidian vault",
                     state: model.vault,
-                    actionTitle: prefs.vaultPath.isEmpty ? "Choose folder" : "Change") {
+                    actionTitle: prefs.vaultPath.isEmpty ? "Choose folder" : "Change",
+                    showsActionWhenDone: true) {
                 chooseVault()
             }
             if !prefs.vaultPath.isEmpty {
@@ -179,6 +180,9 @@ private struct StepRow: View {
     let subtitle: String
     let state: StepState
     let actionTitle: String
+    /// A finished step normally has nothing left to do. The export folder is
+    /// the exception: changing it stays useful.
+    var showsActionWhenDone = false
     let action: () -> Void
 
     var body: some View {
@@ -224,7 +228,8 @@ private struct StepRow: View {
 
     private var needsButton: Bool {
         switch state {
-        case .needsAction, .failed, .done: return true
+        case .needsAction, .failed: return true
+        case .done: return showsActionWhenDone
         case .checking, .working: return false
         }
     }
