@@ -25,6 +25,10 @@ struct SetupView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .task { await model.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard !model.isBusy else { return }
+            Task { await model.refresh() }
+        }
     }
 
     private var header: some View {
@@ -57,47 +61,51 @@ struct SetupView: View {
     }
 
     private var notesStep: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             StepRow(title: "Notes model",
-                    subtitle: model.ollamaDetected
-                        ? "Ollama is installed, so Scribe will use it"
-                        : "No Ollama here, so Scribe brings its own",
+                    subtitle: notesSubtitle,
                     state: model.notes,
-                    actionTitle: model.engine == .ollama ? "Pull" : "Download") {
+                    actionTitle: "Download") {
                 Task { await model.setUpNotes() }
             }
 
-            if model.engine == .local, !model.notes.isBusy {
-                Picker("Size", selection: Binding(
-                    get: { model.localModel.id },
-                    set: { id in model.chooseLocalModel(LocalRuntime.model(id: id)) })
+            if !model.notesOptions.isEmpty, !model.notes.isBusy {
+                Picker("Notes model", selection: Binding(
+                    get: { model.notesSelection },
+                    set: { if let source = $0 { model.chooseNotes(source) } })
                 ) {
-                    ForEach(LocalRuntime.models) { candidate in
-                        Text("\(candidate.name) · \(Downloader.humanBytes(candidate.downloadBytes))")
-                            .tag(candidate.id)
+                    ForEach(model.notesOptions) { option in
+                        HStack(spacing: 6) {
+                            Text(option.title)
+                            Text(option.detail).foregroundStyle(.secondary)
+                        }
+                        .tag(Optional(option.source))
                     }
                 }
                 .pickerStyle(.radioGroup)
+                .labelsHidden()
                 .padding(.leading, 34)
-
-                Text(model.localModel.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 34)
             }
 
-            if model.ollamaDetected, !model.notes.isBusy {
-                HStack {
-                    Text("Model").font(.caption).foregroundStyle(.secondary)
-                    TextField("Model", text: $prefs.ollamaModel)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
-                    Button("Use built-in instead") { model.chooseEngine(.local) }
+            if model.ollamaStatus == .notRunning, !model.notes.isBusy {
+                HStack(spacing: 8) {
+                    Text("Ollama is installed but not running.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Start Ollama") { Task { await model.startOllama() } }
                         .buttonStyle(.link)
                         .font(.caption)
                 }
                 .padding(.leading, 34)
             }
+        }
+    }
+
+    private var notesSubtitle: String {
+        switch model.ollamaStatus {
+        case .running: return "Models already in Ollama need no download"
+        case .notRunning: return "Start Ollama to use its models, or pick a built-in one"
+        case .notInstalled: return "Scribe downloads one, or install Ollama to use your own"
         }
     }
 

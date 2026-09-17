@@ -87,7 +87,7 @@ enum Doctor {
                     defer { semaphore.signal() }
                     guard await OllamaService.isRunning(host: prefs.ollamaHost) else { return }
                     let models = await OllamaService.installedModels(host: prefs.ollamaHost)
-                    if models.contains(prefs.ollamaModel) {
+                    if models.contains(where: { OllamaService.sameModel($0, prefs.ollamaModel) }) {
                         result = (true, "\(prefs.ollamaModel) via Ollama")
                     } else {
                         result = (false, "`\(prefs.ollamaModel)` not pulled — have: \(models.joined(separator: ", "))")

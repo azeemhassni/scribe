@@ -45,6 +45,47 @@ enum OllamaService {
         throw ChatError.ollamaNotRunning("Ollama was opened but did not start answering within 30 seconds.")
     }
 
+    struct Model: Hashable {
+        let name: String
+        let sizeBytes: Int64
+    }
+
+    /// Chat-capable models installed in Ollama. Embedding models are left out:
+    /// they are installed alongside chat models but cannot write notes.
+    static func chatModels(host: String) async -> [Model] {
+        guard let url = URL(string: host)?.appendingPathComponent("api/tags") else { return [] }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = json["models"] as? [[String: Any]] else { return [] }
+        return models.compactMap { entry in
+            guard let name = entry["name"] as? String else { return nil }
+            let details = entry["details"] as? [String: Any]
+            let families = (details?["families"] as? [String] ?? []) + [details?["family"] as? String ?? ""]
+            if name.lowercased().contains("embed") || families.contains(where: { $0.lowercased().contains("bert") }) {
+                return nil
+            }
+            return Model(name: name, sizeBytes: (entry["size"] as? NSNumber)?.int64Value ?? 0)
+        }
+    }
+
+    /// Ollama resolves a bare name to its `:latest` tag, so `mistral` and
+    /// `mistral:latest` are the same model.
+    static func sameModel(_ a: String, _ b: String) -> Bool {
+        func normalised(_ name: String) -> String {
+            let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
+            return trimmed.hasSuffix(":latest") ? String(trimmed.dropLast(7)) : trimmed
+        }
+        return normalised(a) == normalised(b)
+    }
+
+    /// Whether Ollama is on this Mac at all, running or not.
+    static var isInstalled: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) != nil
+            || ["/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"].contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
     static func installedModels(host: String) async -> [String] {
         guard let url = URL(string: host)?.appendingPathComponent("api/tags") else { return [] }
         var request = URLRequest(url: url)

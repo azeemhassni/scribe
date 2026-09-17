@@ -3,6 +3,8 @@ import Foundation
 /// UserDefaults-backed configuration. Everything here is local to this Mac.
 final class Prefs: ObservableObject {
     static let shared = Prefs()
+    /// Recommended when Ollama is installed but has nothing suitable yet.
+    static let defaultOllamaModel = "gpt-oss:20b"
     private let defaults = UserDefaults.standard
 
     private func string(_ key: String, _ fallback: String) -> String {
@@ -148,7 +150,7 @@ final class Prefs: ObservableObject {
         hindustaniScript = defaults.string(forKey: "hindustaniScript") ?? HindustaniScript.systemDefault.rawValue
 
         ollamaHost = defaults.string(forKey: "ollamaHost") ?? "http://127.0.0.1:11434"
-        ollamaModel = defaults.string(forKey: "ollamaModel") ?? "gpt-oss:20b"
+        ollamaModel = defaults.string(forKey: "ollamaModel") ?? Self.defaultOllamaModel
         contextTokens = defaults.object(forKey: "contextTokens") as? Int ?? 32768
         notesEngine = defaults.string(forKey: "notesEngine") ?? NotesEngineKind.ollama.rawValue
         localModelID = defaults.string(forKey: "localModelID") ?? LocalRuntime.recommendedModel().id

@@ -31,13 +31,16 @@ final class SetupModel: ObservableObject {
     @Published var microphone: StepState = .checking
     @Published var vault: StepState = .checking
 
-    @Published var engine: NotesEngineKind = .ollama
-    @Published var localModel: LocalModel = LocalRuntime.recommendedModel()
-    @Published var ollamaDetected = false
+    /// Every model the notes can be written with, installed or not.
+    @Published var notesOptions: [NotesOption] = []
+    @Published var notesSelection: NotesOption.Source?
+    @Published var ollamaStatus: OllamaStatus = .notInstalled
+
+    enum OllamaStatus { case notInstalled, notRunning, running }
 
     private let prefs = Prefs.shared
-    /// Set once the user picks an engine, so detection stops overriding them.
-    private var engineWasChosen = false
+    /// Set once the user picks a model, so a re-check never overrides them.
+    private var notesWereChosen = false
 
     var isReady: Bool {
         speechBinary.isDone && speechModel.isDone && notes.isDone && microphone.isDone
@@ -50,8 +53,6 @@ final class SetupModel: ObservableObject {
     // MARK: - Checks
 
     func refresh() async {
-        engine = NotesEngineKind(rawValue: prefs.notesEngine) ?? .ollama
-        localModel = LocalRuntime.model(id: prefs.localModelID)
         checkSpeechBinary()
         checkSpeechModel()
         checkMicrophone()
@@ -102,43 +103,107 @@ final class SetupModel: ObservableObject {
         vault = .done(prefs.vaultPath)
     }
 
+    /// Lists the models the notes can be written with and settles which one is
+    /// selected.
+    ///
+    /// Models already in Ollama come first and need nothing downloaded; the
+    /// built-in engine's models follow with their download size. One list, one
+    /// selection: choosing an installed model completes the step on the spot.
     func checkNotes() async {
-        notes = .checking
-        ollamaDetected = await OllamaService.isRunning(host: prefs.ollamaHost)
+        if notesOptions.isEmpty { notes = .checking }
 
-        // Auto-detection is a first-run convenience, not a standing policy: once
-        // the engine has been chosen, re-running these checks must not quietly
-        // switch it back because Ollama happens to be running.
-        if engineWasChosen || prefs.hasCompletedSetup {
-            engine = NotesEngineKind(rawValue: prefs.notesEngine) ?? .ollama
-        } else {
-            engine = ollamaDetected ? .ollama : .local
-            prefs.notesEngine = engine.rawValue
+        let running = await OllamaService.isRunning(host: prefs.ollamaHost)
+        ollamaStatus = running ? .running : (OllamaService.isInstalled ? .notRunning : .notInstalled)
+        let installed = running ? await OllamaService.chatModels(host: prefs.ollamaHost) : []
+
+        var options = installed.map { model in
+            NotesOption(source: .ollama(model.name),
+                        title: model.name,
+                        detail: "In Ollama · \(Downloader.humanBytes(model.sizeBytes))",
+                        isReady: true)
         }
+        // Ollama with nothing in it: offer the recommended model as a pull.
+        if running && installed.isEmpty {
+            let name = Prefs.defaultOllamaModel
+            options.append(NotesOption(source: .ollama(name), title: name,
+                                       detail: "Ollama · 13 GB download", isReady: false))
+        }
+        for model in LocalRuntime.models {
+            let ready = LocalRuntime.isRuntimeInstalled && model.isDownloaded
+            options.append(NotesOption(source: .builtIn(model.id),
+                                       title: model.name,
+                                       detail: ready ? "Built in · downloaded" : "Built in · \(Downloader.humanBytes(model.downloadBytes)) download",
+                                       isReady: ready))
+        }
+        notesOptions = options
 
-        switch engine {
+        let valid = Set(options.map(\.source))
+        if let current = notesSelection, valid.contains(current), notesWereChosen {
+            // keep the user's choice
+        } else if let saved = savedSelection(installed: installed), valid.contains(saved),
+                  notesWereChosen || prefs.hasCompletedSetup || isReady(saved) {
+            notesSelection = saved
+        } else {
+            notesSelection = recommendedSelection(installed: installed)
+            if let selection = notesSelection { save(selection) }
+        }
+        updateNotesState()
+    }
+
+    /// What the preferences currently point at, if anything.
+    private func savedSelection(installed: [OllamaService.Model]) -> NotesOption.Source? {
+        switch NotesEngineKind(rawValue: prefs.notesEngine) ?? .ollama {
         case .ollama:
-            guard ollamaDetected else {
-                notes = .needsAction("Ollama is not running — start it, or use the built-in engine")
-                return
-            }
-            let models = await OllamaService.installedModels(host: prefs.ollamaHost)
-            if models.contains(prefs.ollamaModel) {
-                notes = .done("\(prefs.ollamaModel) via Ollama")
-            } else if let first = models.first {
-                notes = .needsAction("`\(prefs.ollamaModel)` is not pulled — you have \(first)")
-            } else {
-                notes = .needsAction("Ollama is running but has no models")
-            }
-
+            let match = installed.first { OllamaService.sameModel($0.name, prefs.ollamaModel) }
+            return .ollama(match?.name ?? prefs.ollamaModel)
         case .local:
-            if LocalRuntime.isRuntimeInstalled && localModel.isDownloaded {
-                notes = .done("\(localModel.name), built in")
-            } else {
-                let total = (LocalRuntime.isRuntimeInstalled ? 0 : LocalRuntime.runtimeDownloadBytes)
-                    + (localModel.isDownloaded ? 0 : localModel.downloadBytes)
-                notes = .needsAction("\(localModel.name) · \(Downloader.humanBytes(total)) download")
+            return .builtIn(prefs.localModelID)
+        }
+    }
+
+    /// First-run default: a model the user already has, then the built-in tier
+    /// that suits this Mac.
+    private func recommendedSelection(installed: [OllamaService.Model]) -> NotesOption.Source? {
+        if let preferred = installed.first(where: { OllamaService.sameModel($0.name, Prefs.defaultOllamaModel) }) {
+            return .ollama(preferred.name)
+        }
+        // The largest installed model that leaves room for everything else.
+        let budget = Int64(ProcessInfo.processInfo.physicalMemory / 2)
+        let fitting = installed.filter { $0.sizeBytes <= budget }.max { $0.sizeBytes < $1.sizeBytes }
+        if let model = fitting ?? installed.min(by: { $0.sizeBytes < $1.sizeBytes }) {
+            return .ollama(model.name)
+        }
+        return .builtIn(LocalRuntime.recommendedModel().id)
+    }
+
+    private func isReady(_ source: NotesOption.Source) -> Bool {
+        notesOptions.first { $0.source == source }?.isReady ?? false
+    }
+
+    private func save(_ source: NotesOption.Source) {
+        switch source {
+        case .ollama(let name):
+            prefs.notesEngine = NotesEngineKind.ollama.rawValue
+            prefs.ollamaModel = name
+        case .builtIn(let id):
+            prefs.notesEngine = NotesEngineKind.local.rawValue
+            prefs.localModelID = id
+        }
+    }
+
+    private func updateNotesState() {
+        guard let selection = notesSelection,
+              let option = notesOptions.first(where: { $0.source == selection }) else {
+            notes = .needsAction("Choose a model")
+            return
+        }
+        if option.isReady {
+            switch selection {
+            case .ollama: notes = .done("\(option.title), in Ollama")
+            case .builtIn: notes = .done("\(option.title), built in")
             }
+        } else {
+            notes = .needsAction("\(option.title) · \(option.detail.components(separatedBy: " · ").last ?? "")")
         }
     }
 
@@ -193,18 +258,17 @@ final class SetupModel: ObservableObject {
     }
 
     func setUpNotes() async {
-        switch engine {
-        case .ollama:
-            await pullOllamaModel()
-        case .local:
-            await installLocalEngine()
+        switch notesSelection {
+        case .ollama(let name): await pullOllamaModel(name)
+        case .builtIn(let id): await installLocalEngine(LocalRuntime.model(id: id))
+        case nil: break
         }
     }
 
-    private func pullOllamaModel() async {
-        notes = .working("Pulling \(prefs.ollamaModel)…", 0)
+    private func pullOllamaModel(_ name: String) async {
+        notes = .working("Downloading \(name) into Ollama…", 0)
         do {
-            try await OllamaService.pull(model: prefs.ollamaModel, host: prefs.ollamaHost) { [weak self] status, fraction in
+            try await OllamaService.pull(model: name, host: prefs.ollamaHost) { [weak self] status, fraction in
                 Task { @MainActor in self?.notes = .working(status, fraction) }
             }
             await checkNotes()
@@ -213,7 +277,7 @@ final class SetupModel: ObservableObject {
         }
     }
 
-    private func installLocalEngine() async {
+    private func installLocalEngine(_ localModel: LocalModel) async {
         do {
             if !LocalRuntime.isRuntimeInstalled {
                 notes = .working("Downloading the inference runtime…", 0)
@@ -235,7 +299,6 @@ final class SetupModel: ObservableObject {
                     }
                 }
             }
-            prefs.localModelID = localModel.id
             await checkNotes()
         } catch {
             notes = .failed(error.localizedDescription)
@@ -248,16 +311,38 @@ final class SetupModel: ObservableObject {
         checkMicrophone()
     }
 
-    func chooseEngine(_ kind: NotesEngineKind) {
-        engineWasChosen = true
-        engine = kind
-        prefs.notesEngine = kind.rawValue
-        Task { await checkNotes() }
+    func chooseNotes(_ source: NotesOption.Source) {
+        notesWereChosen = true
+        notesSelection = source
+        save(source)
+        updateNotesState()
     }
 
-    func chooseLocalModel(_ model: LocalModel) {
-        localModel = model
-        prefs.localModelID = model.id
-        Task { await checkNotes() }
+    /// Opens Ollama so its models appear in the list.
+    func startOllama() async {
+        notes = .working("Starting Ollama…", nil)
+        do {
+            try await OllamaService.launch(host: prefs.ollamaHost)
+        } catch {
+            notes = .failed(error.localizedDescription)
+            return
+        }
+        await checkNotes()
     }
+}
+
+/// One way to write notes: a model in Ollama or one of the built-in engine's.
+struct NotesOption: Identifiable, Hashable {
+    enum Source: Hashable {
+        case ollama(String)
+        case builtIn(String)
+    }
+
+    let source: Source
+    let title: String
+    let detail: String
+    /// Usable now, with nothing to download.
+    let isReady: Bool
+
+    var id: Source { source }
 }
