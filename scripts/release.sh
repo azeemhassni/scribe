@@ -48,6 +48,15 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 shasum -a 256 "$ZIP"
 
+echo "==> Writing appcast"
+BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")"
+NOTES="build/release-notes.md"
+PREVIOUS="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+git log --format='- %s' ${PREVIOUS:+"$PREVIOUS"..}HEAD > "$NOTES"
+scripts/appcast.sh "$ZIP" "$VERSION" "$BUILD" \
+  "https://github.com/azeemhassni/scribe/releases/download/$TAG/Scribe.zip" "$NOTES" > build/appcast.xml
+xmllint --noout build/appcast.xml
+
 if [ "$DRY_RUN" = "--dry-run" ]; then
   echo "Dry run: $ZIP is ready, nothing published."
   exit 0
@@ -56,5 +65,7 @@ fi
 echo "==> Publishing $TAG"
 git tag -a "$TAG" -m "Scribe $VERSION"
 git push origin "$TAG"
-gh release create "$TAG" "$ZIP" --title "Scribe $VERSION" --generate-notes
+# appcast.xml rides along with every release, so
+# releases/latest/download/appcast.xml always describes the newest version.
+gh release create "$TAG" "$ZIP" build/appcast.xml --title "Scribe $VERSION" --notes-file "$NOTES"
 echo "Released: $(gh release view "$TAG" --json url --jq .url)"
