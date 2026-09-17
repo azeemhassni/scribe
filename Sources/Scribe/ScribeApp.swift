@@ -12,6 +12,7 @@ struct ScribeApp: App {
         if CommandLine.arguments.contains("--relink") { RelinkTest.run() }
         if CommandLine.arguments.contains("--setup-local") { LocalSetupTest.run() }
         if CommandLine.arguments.contains("--retry-notes") { RetryNotesTest.run() }
+        if CommandLine.arguments.contains("--setup-check") { SetupCheck.run() }
         if let i = CommandLine.arguments.firstIndex(of: "--probe-detection") {
             let args = CommandLine.arguments
             DetectionProbe.run(seconds: i + 1 < args.count ? Int(args[i + 1]) ?? 10 : 10)

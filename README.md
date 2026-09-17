@@ -9,7 +9,7 @@ Scribe notices when you join a call, records it, transcribes it and writes notes
 - macOS 14.4 or later on Apple Silicon
 - [Homebrew](https://brew.sh), for whisper.cpp
 - About 1 GB of disk for the speech model, plus a notes model:
-  - [Ollama](https://ollama.com) with `gpt-oss:20b` (13 GB), if you have it, or
+  - [Ollama](https://ollama.com) with any chat model you already have, or
   - the built-in engine, which downloads a 2–9 GB model depending on your RAM
 
 ## Install
@@ -58,6 +58,7 @@ Other command-line modes:
 | Flag | Does |
 |---|---|
 | `--probe-detection [seconds]` | Show which apps are using audio and whether it counts as a meeting |
+| `--setup-check` | Show the notes models setup would offer and which one it picks |
 | `--transcribe-file <audio>` | Run an audio file through transcription and notes |
 | `--retry-notes` | Retry notes for meetings where they failed |
 | `--setup-local` | Install the built-in notes engine |
