@@ -269,7 +269,7 @@ struct MenuContent: View {
             Button("Log") { controller.openLog() }
             Spacer()
             Button("Setup…") { SetupWindow.open(openWindow) }
-            Button("Settings…") { openSettings() }
+            Button("Settings…") { SettingsWindow.open(openSettings) }
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .buttonStyle(.link)
@@ -407,6 +407,16 @@ struct PreferencesView: View {
 
 /// The library window is opened from several places; keeping the id and the
 /// activation in one place stops them drifting apart.
+enum SettingsWindow {
+    /// Scribe is a menu bar app and is not active while you use another app, so
+    /// Settings opened on its own lands behind that app and looks like nothing
+    /// happened. Coming forward first puts it in front.
+    static func open(_ openSettings: OpenSettingsAction) {
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettings()
+    }
+}
+
 enum SetupWindow {
     static let id = "setup"
 
