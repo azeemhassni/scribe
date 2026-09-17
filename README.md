@@ -20,6 +20,8 @@ Scribe notices when you join a call, records it, transcribes it and writes notes
 
 Scribe lives in the menu bar. Turn on **Start Scribe at login** in Settings, or it can't detect meetings after a restart.
 
+Scribe checks for a new version once a day and asks before installing it. **Updates…** in the menu checks straight away.
+
 ## How it works
 
 - **Detection.** A meeting is a call app using the microphone (Zoom, Teams, Slack, FaceTime and others), a browser using the microphone with a meeting tab open (Meet, Teams, Zoom, Whereby and others), or any app using the microphone and speakers at once. Scribe asks before recording; Settings can switch this to automatic.
@@ -70,7 +72,22 @@ Other command-line modes:
 scripts/release.sh 0.1.0
 ```
 
-Builds for Apple Silicon, notarizes, tags and publishes a GitHub release with `Scribe.zip`. It needs a notarytool keychain profile; see the top of the script.
+Builds for Apple Silicon, notarizes, tags and publishes a GitHub release with `Scribe.zip` and `appcast.xml`. The release notes are the commit messages since the last tag.
+
+It needs two things in your keychain:
+
+- A notarytool profile. See the top of `scripts/release.sh`.
+- The update signing key, created once with:
+
+  ```bash
+  .build/artifacts/sparkle/Sparkle/bin/generate_keys --account scribe
+  ```
+
+Installed copies only accept updates signed with this key. Back it up; if it is lost, existing users have to download the next version by hand:
+
+```bash
+.build/artifacts/sparkle/Sparkle/bin/generate_keys --account scribe -x scribe-update-key.txt
+```
 
 ## License
 
