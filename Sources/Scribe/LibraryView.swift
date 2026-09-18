@@ -22,6 +22,7 @@ struct LibraryView: View {
     @State private var selection: LibrarySelection? = .actions
     @State private var query = ""
     @State private var pendingSeek: PendingSeek?
+    @ObservedObject private var navigator = LibraryNavigator.shared
 
     var body: some View {
         NavigationSplitView {
@@ -73,7 +74,18 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("Meetings")
-        .onAppear { library.reload() }
+        .onAppear {
+            library.reload()
+            consumeNavigationRequest()
+        }
+        .onChange(of: navigator.request) { _, _ in consumeNavigationRequest() }
+    }
+
+    /// Honours a request from the menu bar to show a particular meeting.
+    private func consumeNavigationRequest() {
+        guard let request = navigator.request else { return }
+        navigator.request = nil
+        selection = request
     }
 
     /// Searches titles, notes *and* transcript text — finding the meeting where

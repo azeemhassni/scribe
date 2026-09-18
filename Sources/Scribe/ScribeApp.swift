@@ -13,6 +13,10 @@ struct ScribeApp: App {
         if CommandLine.arguments.contains("--setup-local") { LocalSetupTest.run() }
         if CommandLine.arguments.contains("--retry-notes") { RetryNotesTest.run() }
         if CommandLine.arguments.contains("--setup-check") { SetupCheck.run() }
+        if let i = CommandLine.arguments.firstIndex(of: "--render-menu"),
+           i + 1 < CommandLine.arguments.count {
+            MenuPreview.run(directory: CommandLine.arguments[i + 1])
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--probe-detection") {
             let args = CommandLine.arguments
             DetectionProbe.run(seconds: i + 1 < args.count ? Int(args[i + 1]) ?? 10 : 10)
@@ -111,172 +115,299 @@ struct MenuContent: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var updater = AppUpdater.shared
 
+    private var recents: [Meeting] { Array(library.meetings.prefix(5)) }
+    private var openActions: Int { library.meetings.reduce(0) { $0 + $1.openActionCount } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
+        VStack(alignment: .leading, spacing: 0) {
+            status
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 10)
 
             if !controller.warnings.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(controller.warnings, id: \.self) { warning in
-                        Label(warning, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                warnings.padding(.bottom, 8)
             }
 
-            controls
-            Divider()
-            recents
-            Divider()
-            footer
+            actions.padding(.bottom, 4)
+
+            if !recents.isEmpty {
+                separator
+                MenuSectionHeader(title: "Recent meetings") {
+                    if openActions > 0 {
+                        Button {
+                            LibraryWindow.open(openWindow, showing: .actions)
+                        } label: {
+                            Text("\(openActions) open")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Show every unfinished action")
+                    }
+                }
+                .padding(.horizontal, 2)
+                .padding(.bottom, 4)
+
+                ForEach(recents) { meeting in
+                    MeetingMenuRow(meeting: meeting) {
+                        LibraryWindow.open(openWindow, showing: .meeting(meeting.id))
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+
+            separator
+            footer.padding(.horizontal, 2).padding(.bottom, 6)
         }
-        .padding(14)
-        .frame(width: 340)
+        .frame(width: 360)
     }
 
-    @ViewBuilder private var header: some View {
+    private var separator: some View {
+        Divider().padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    // MARK: Status
+
+    @ViewBuilder private var status: some View {
         switch controller.state {
         case .idle:
-            Label("Watching for meetings", systemImage: "waveform")
-                .font(.headline)
+            StatusLine(symbol: "waveform", tint: .secondary,
+                       title: "Watching for meetings",
+                       subtitle: prefs.autoDetect
+                           ? "Scribe starts on its own when a call begins"
+                           : "Auto-detect is off — start recording yourself")
+
         case .armed(let message):
-            Label(message, systemImage: "ear")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+            StatusLine(symbol: "ear", tint: .orange, title: "Listening", subtitle: message)
+
         case .detected(let name):
-            VStack(alignment: .leading, spacing: 2) {
-                Label("Meeting in \(name)", systemImage: "waveform.badge.plus")
-                    .font(.headline)
-                Text("Not recording yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            StatusLine(symbol: "waveform.badge.plus", tint: .accentColor,
+                       title: "Meeting in \(name)", subtitle: "Not recording yet")
+
         case .recording:
-            VStack(alignment: .leading, spacing: 2) {
-                Label("Recording", systemImage: "record.circle.fill")
-                    .font(.headline)
-                    .foregroundStyle(.red)
-                // Text(style: .timer) is updated by the system, so the clock keeps
-                // running however often the menu redraws.
-                HStack(spacing: 4) {
-                    if let started = controller.recordingStarted {
-                        Text(started, style: .timer).monospacedDigit()
+            HStack(spacing: 10) {
+                StatusChip(symbol: "record.circle.fill", tint: .red, pulsing: true)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 5) {
+                        Text("Recording").font(.system(size: 13, weight: .semibold))
+                        // Driven by the system clock, so it keeps counting
+                        // however often this view happens to redraw.
+                        if let started = controller.recordingStarted {
+                            Text(started, style: .timer)
+                                .font(.system(size: 13).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Text(recordingDetail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
             }
+
         case .processing(let message):
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text(message).font(.headline)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 26, height: 26)
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Working").font(.system(size: 13, weight: .semibold))
+                    Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
+
         case .failed(let message):
-            VStack(alignment: .leading, spacing: 4) {
-                Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                StatusLine(symbol: "exclamationmark.triangle.fill", tint: .orange,
+                           title: "Something went wrong", subtitle: message)
                 Button("Dismiss") { controller.clearError() }
-                    .buttonStyle(.link)
-                    .font(.caption)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 36)
             }
         }
     }
 
     private var recordingDetail: String {
-        var parts = [""]
+        var parts: [String] = []
         if !controller.activePlatforms.isEmpty {
             parts.append(controller.activePlatforms.joined(separator: ", "))
         }
-        parts.append("\(controller.transcribedLines) lines transcribed")
+        parts.append("\(controller.transcribedLines) lines")
         return parts.joined(separator: " · ")
     }
 
-    @ViewBuilder private var controls: some View {
-        if case .recording = controller.state {
-            HStack {
-                Button("Stop & write notes") { controller.stopManually() }
-                    .buttonStyle(.borderedProminent)
-                Button("Discard") { controller.discardCurrent() }
-            }
-        } else if case .processing = controller.state {
-            EmptyView()
-        } else if case .detected = controller.state {
-            HStack {
-                Button("Record") { controller.recordDetectedMeeting() }
-                    .buttonStyle(.borderedProminent)
-                Button("Not now") { controller.dismissDetectedMeeting() }
-            }
-        } else {
-            HStack {
-                Button("Record now") { controller.startManually() }
-                Toggle("Auto-detect", isOn: $prefs.autoDetect)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .onChange(of: prefs.autoDetect) { _, _ in controller.applyDetectorSettings() }
-            }
-        }
-    }
-
-    @ViewBuilder private var recents: some View {
-        if library.meetings.isEmpty {
-            Text("No meetings yet.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Recent meetings").font(.caption).foregroundStyle(.secondary)
-                ForEach(library.meetings.prefix(5)) { meeting in
-                    Button {
-                        LibraryWindow.open(openWindow)
-                    } label: {
-                        HStack(spacing: 6) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(meeting.title)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Text(MeetingTime.summary(meeting))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            if meeting.openActionCount > 0 {
-                                Text("\(meeting.openActionCount)")
-                                    .font(.caption2.monospacedDigit())
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(Color.accentColor.opacity(0.18), in: Capsule())
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .font(.callout)
+    private var warnings: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(controller.warnings, id: \.self) { warning in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 1)
+                    Text(warning)
+                        .font(.system(size: 11))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.orange.opacity(0.22)), in: .rect(cornerRadius: 8))
+        .padding(.horizontal, 10)
     }
 
-    private var footer: some View {
-        HStack {
-            Button("Open library") { LibraryWindow.open(openWindow) }
-            Button("Log") { controller.openLog() }
-            Spacer()
-            Button("Updates…") { AppUpdater.shared.checkForUpdates() }
-                .disabled(!updater.canCheckForUpdates)
-            Button("Setup…") { SetupWindow.open(openWindow) }
-            Button("Settings…") { SettingsWindow.open(openSettings) }
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+    // MARK: Actions
+
+    @ViewBuilder private var actions: some View {
+        switch controller.state {
+        case .recording:
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    Button { controller.stopManually() } label: {
+                        Label("Stop & write notes", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    Button("Discard") { controller.discardCurrent() }
+                        .buttonStyle(.glass)
+                }
+            }
+            .controlSize(.regular)
+            .padding(.horizontal, 10)
+
+        case .detected:
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    Button { controller.recordDetectedMeeting() } label: {
+                        Label("Record this", systemImage: "record.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    Button("Not now") { controller.dismissDetectedMeeting() }
+                        .buttonStyle(.glass)
+                }
+            }
+            .controlSize(.regular)
+            .padding(.horizontal, 10)
+
+        case .processing:
+            EmptyView()
+
+        default:
+            VStack(spacing: 2) {
+                Button { controller.startManually() } label: {
+                    Label("Record now", systemImage: "record.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+
+                Toggle(isOn: $prefs.autoDetect) {
+                    Label("Auto-detect meetings", systemImage: "sparkles")
+                        .font(.system(size: 12))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .padding(.horizontal, 10)
+                .onChange(of: prefs.autoDetect) { _, _ in controller.applyDetectorSettings() }
+            }
         }
-        .buttonStyle(.link)
-        .font(.caption)
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 2) {
+            Button {
+                LibraryWindow.open(openWindow)
+            } label: {
+                Label("Open Library", systemImage: "rectangle.stack")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(MenuRowStyle(stretch: false, verticalPadding: 4))
+
+            Spacer(minLength: 0)
+
+            Menu {
+                Button("Set Up Scribe…") { SetupWindow.open(openWindow) }
+                Button("Settings…") { SettingsWindow.open(openSettings) }
+                    .keyboardShortcut(",", modifiers: .command)
+                Divider()
+                Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+                Button("Show Log") { controller.openLog() }
+                Divider()
+                Button("Quit Scribe") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 13))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .padding(.trailing, 8)
+            .help("More")
+        }
+    }
+}
+
+/// Status glyph plus one line of explanation, used for every menu state that is
+/// not a live recording.
+private struct StatusLine: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StatusChip(symbol: symbol, tint: tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// One meeting in the menu. Opens that meeting rather than just the window,
+/// which is the whole point of listing them here.
+private struct MeetingMenuRow: View {
+    let meeting: Meeting
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(meeting.title)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                    Text(MeetingTime.summary(meeting))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if meeting.openActionCount > 0 {
+                    CountBadge(count: meeting.openActionCount)
+                        .help("\(meeting.openActionCount) unfinished action\(meeting.openActionCount == 1 ? "" : "s")")
+                }
+            }
+        }
+        .buttonStyle(MenuRowStyle())
     }
 }
 
@@ -444,7 +575,12 @@ enum SetupWindow {
 enum LibraryWindow {
     static let id = "library"
 
-    static func open(_ openWindow: OpenWindowAction) {
+    /// - Parameter selection: what the window should show. Without it the
+    ///   library keeps whatever was selected last, so opening from a specific
+    ///   meeting in the menu would land somewhere else entirely.
+    @MainActor
+    static func open(_ openWindow: OpenWindowAction, showing selection: LibrarySelection? = nil) {
+        if let selection { LibraryNavigator.shared.request = selection }
         openWindow(id: id)
         // Scribe is an accessory app, so its windows do not come forward on
         // their own.
