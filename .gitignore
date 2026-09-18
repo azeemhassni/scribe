@@ -4,3 +4,7 @@ build/
 *.app
 *.zip
 .DS_Store
+
+# Sparkle signing key. Publishing this would let anyone sign a Scribe update.
+scribe-update-key.txt
+*.private-key
