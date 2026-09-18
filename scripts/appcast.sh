@@ -27,7 +27,7 @@ cat <<XML
       <pubDate>$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")</pubDate>
       <sparkle:version>$BUILD</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/azeemhassni/scribe/releases/tag/v$VERSION</sparkle:fullReleaseNotesLink>
       $DESCRIPTION
       <enclosure url="$URL" type="application/octet-stream" $SIGNATURE/>

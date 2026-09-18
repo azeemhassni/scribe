@@ -5,11 +5,10 @@ import Foundation
 /// Captures everything the Mac is playing (i.e. the other participants) using a
 /// CoreAudio process tap — no virtual audio driver, no BlackHole install.
 ///
-/// Requires macOS 14.4+ and the "System Audio Recording" privacy permission.
+/// Requires the "System Audio Recording" privacy permission.
 final class SystemAudioTap {
 
     enum TapError: LocalizedError {
-        case unsupportedOS
         case noOutputDevice
         case tapCreationFailed(OSStatus)
         case aggregateCreationFailed(OSStatus)
@@ -18,7 +17,6 @@ final class SystemAudioTap {
 
         var errorDescription: String? {
             switch self {
-            case .unsupportedOS: return "System audio capture needs macOS 14.4 or later."
             case .noOutputDevice: return "No default output device."
             case .tapCreationFailed(let s):
                 return "Could not create the audio tap (\(s)). Grant Scribe permission under System Settings › Privacy & Security › Screen & System Audio Recording."
@@ -40,7 +38,6 @@ final class SystemAudioTap {
 
     /// - Parameter onAudio: receives 16 kHz mono PCM, already downmixed.
     func start(onAudio: @escaping (AVAudioPCMBuffer) -> Void) throws {
-        guard #available(macOS 14.4, *) else { throw TapError.unsupportedOS }
         guard let outputUID = CA.defaultOutputDeviceUID else { throw TapError.noOutputDevice }
 
         // Exclude ourselves so we never record our own notification sounds.

@@ -3,7 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "Scribe",
-    platforms: [.macOS("14.4")],
+    // macOS 26 is the floor for Liquid Glass. Linking against the modern SDK is
+    // also what makes the system restyle standard controls: a binary that
+    // records an older SDK is treated as a legacy app and keeps the old look,
+    // however new the machine running it is.
+    platforms: [.macOS("26.0")],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],

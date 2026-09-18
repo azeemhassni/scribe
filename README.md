@@ -6,7 +6,7 @@ Scribe notices when you join a call, records it, transcribes it and writes notes
 
 ## Requirements
 
-- macOS 14.4 or later on Apple Silicon
+- macOS 26 or later on Apple Silicon
 - [Homebrew](https://brew.sh), for whisper.cpp
 - About 1 GB of disk for the speech model, plus a notes model:
   - [Ollama](https://ollama.com) with any chat model you already have, or
