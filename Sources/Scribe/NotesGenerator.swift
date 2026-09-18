@@ -22,7 +22,10 @@ enum NotesGenerator {
         let client = try await NotesEngineFactory.makeClient(prefs: prefs)
 
         let language = Language.dominant(in: meeting.utterances)
-        let summarizer = Summarizer(client: client, language: language)
+        let summarizer = Summarizer(
+            client: client,
+            outputLanguage: NotesLanguage.resolve(preference: prefs.notesLanguage,
+                                                  meetingLanguage: language))
         let transcript = MeetingSession.format(meeting.utterances)
 
         onStatus("Writing notes with \(client.label)…")

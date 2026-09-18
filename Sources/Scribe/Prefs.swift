@@ -99,6 +99,10 @@ final class Prefs: ObservableObject {
     @Published var contextTokens: Int {
         didSet { defaults.set(contextTokens, forKey: "contextTokens") }
     }
+    /// Language the notes are written in, independent of what was spoken.
+    @Published var notesLanguage: String {
+        didSet { defaults.set(notesLanguage, forKey: "notesLanguage") }
+    }
     /// Which engine writes the notes: Ollama, or the built-in llama.cpp server.
     @Published var notesEngine: String {
         didSet { defaults.set(notesEngine, forKey: "notesEngine") }
@@ -152,6 +156,7 @@ final class Prefs: ObservableObject {
         ollamaHost = defaults.string(forKey: "ollamaHost") ?? "http://127.0.0.1:11434"
         ollamaModel = defaults.string(forKey: "ollamaModel") ?? Self.defaultOllamaModel
         contextTokens = defaults.object(forKey: "contextTokens") as? Int ?? 32768
+        notesLanguage = defaults.string(forKey: "notesLanguage") ?? NotesLanguage.matchMeeting
         notesEngine = defaults.string(forKey: "notesEngine") ?? NotesEngineKind.ollama.rawValue
         localModelID = defaults.string(forKey: "localModelID") ?? LocalRuntime.recommendedModel().id
         hasCompletedSetup = defaults.object(forKey: "hasCompletedSetup") as? Bool ?? false

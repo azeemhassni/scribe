@@ -6,21 +6,15 @@ final class Summarizer {
 
     private let client: ChatClient
 
-    /// Whisper code of the language the meeting was held in, if known.
-    private let language: String?
+    /// English name of the language to write in, or nil to leave it to the
+    /// model. Resolved by the caller: only it knows whether English came from
+    /// the user asking for English or from nobody asking for anything.
+    private let outputLanguage: String?
 
-    init(client: ChatClient, language: String? = nil) {
+    init(client: ChatClient, outputLanguage: String? = nil) {
         self.client = client
-        self.language = language
+        self.outputLanguage = outputLanguage
         self.contextTokens = client.contextWindow
-    }
-
-    /// Notes are written in the meeting's own language. Beyond reading more
-    /// naturally, it keeps action items in the same words as the transcript,
-    /// which is what lets an action be matched back to the moment it was said.
-    private var outputLanguage: String? {
-        guard let language, language != "en", language != "auto" else { return nil }
-        return Language.englishName(language)
     }
 
     private let contextTokens: Int

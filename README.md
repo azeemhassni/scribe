@@ -27,7 +27,7 @@ Scribe checks for a new version once a day and asks before installing it. **Upda
 - **Detection.** A meeting is a call app using the microphone (Zoom, Teams, Slack, FaceTime and others), a browser using the microphone with a meeting tab open (Meet, Teams, Zoom, Whereby and others), or any app using the microphone and speakers at once. Scribe asks before recording; Settings can switch this to automatic.
 - **Recording.** Your microphone and the call audio are recorded separately, so the transcript knows what you said and what everyone else said.
 - **Transcription.** whisper.cpp with Whisper large-v3-turbo. The language is detected per segment. Hindi and Urdu are written in the script you choose in Settings.
-- **Notes.** A summary, key points, decisions, action items and open questions, written in the meeting's language. Action items link back to the line where they were said.
+- **Notes.** A summary, key points, decisions, action items and open questions. Written in the meeting's own language by default, or in a language you pick in Settings, whatever was spoken. Action items link back to the line where they were said.
 - **Library.** Meetings, a searchable transcript, playback from any line, and every action item across meetings in one list. Meetings can also be exported as Markdown to a folder, such as an Obsidian vault.
 
 If notes can't be written, the transcript is still saved and the meeting has a Retry button.

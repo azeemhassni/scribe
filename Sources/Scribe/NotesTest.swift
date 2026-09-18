@@ -19,7 +19,10 @@ enum NotesTest {
             do {
                 let client = try await NotesEngineFactory.makeClient(prefs: prefs)
                 print("Summarising a sample transcript with \(client.label)…\n")
-                summarizer = Summarizer(client: client)
+                summarizer = Summarizer(
+                    client: client,
+                    outputLanguage: NotesLanguage.resolve(preference: prefs.notesLanguage,
+                                                          meetingLanguage: nil))
                 let body = try await summarizer!.notes(for: sampleTranscript,
                                                       title: "Q4 launch sync",
                                                       participantsHint: "Platform: Zoom")

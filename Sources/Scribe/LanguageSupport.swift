@@ -41,6 +41,57 @@ enum HindustaniScript: String, CaseIterable, Identifiable {
     }
 }
 
+/// The language notes are written in, which is a separate choice from the
+/// language the meeting was held in: a Spanish standup can be written up in
+/// English, and an English one in Urdu.
+enum NotesLanguage {
+
+    /// Follow whatever was spoken, which is the default and what Scribe did
+    /// before this was a setting.
+    static let matchMeeting = "auto"
+
+    struct Option: Identifiable, Hashable {
+        let code: String
+        let name: String
+        var id: String { code }
+    }
+
+    /// A shortlist rather than every language Whisper can hear. Notes are
+    /// written by the notes model, not by Whisper, so the limit here is what a
+    /// local model writes competently — and a list of a hundred would be worse
+    /// to scroll than to use.
+    private static let codes = [
+        "en", "es", "zh", "hi", "ur", "ar", "fr", "de", "pt", "ru", "ja", "ko",
+        "it", "tr", "nl", "pl", "id", "vi", "th", "bn", "fa", "sv", "uk", "he",
+        "ms", "ta",
+    ]
+
+    static let options: [Option] = codes
+        .map { Option(code: $0, name: displayName($0)) }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+    /// "Spanish (Español)" — the English name to find it by, the native name to
+    /// recognise it by.
+    static func displayName(_ code: String) -> String {
+        let english = Language.englishName(code)
+        guard let native = Locale(identifier: code).localizedString(forLanguageCode: code),
+              native.caseInsensitiveCompare(english) != .orderedSame else { return english }
+        return "\(english) (\(native))"
+    }
+
+    /// The language to name in the prompt, or nil to say nothing.
+    ///
+    /// An explicit choice is always stated, English included: without it, a
+    /// Spanish meeting would be written up in Spanish even though the user asked
+    /// for English. Only "match the meeting" stays silent, and then only when
+    /// the meeting was already in English.
+    static func resolve(preference: String, meetingLanguage: String?) -> String? {
+        guard preference == matchMeeting else { return Language.englishName(preference) }
+        guard let meetingLanguage, meetingLanguage != "en", meetingLanguage != "auto" else { return nil }
+        return Language.englishName(meetingLanguage)
+    }
+}
+
 enum Language {
 
     /// English name for a Whisper language code, for use in prompts.

@@ -535,6 +535,17 @@ struct PreferencesView: View {
                 LabeledContent("Context") {
                     Stepper("\(prefs.contextTokens) tokens", value: $prefs.contextTokens, in: 4096...131072, step: 4096)
                 }
+                Picker("Notes language", selection: $prefs.notesLanguage) {
+                    Text("Match the meeting").tag(NotesLanguage.matchMeeting)
+                    Divider()
+                    ForEach(NotesLanguage.options) { option in
+                        Text(option.name).tag(option.code)
+                    }
+                }
+                Text("Notes, titles and action items are written in this language whatever was spoken. The transcript stays in the language of the meeting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
