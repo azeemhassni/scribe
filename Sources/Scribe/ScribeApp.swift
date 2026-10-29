@@ -13,6 +13,21 @@ struct ScribeApp: App {
         if CommandLine.arguments.contains("--setup-local") { LocalSetupTest.run() }
         if CommandLine.arguments.contains("--retry-notes") { RetryNotesTest.run() }
         if CommandLine.arguments.contains("--setup-check") { SetupCheck.run() }
+        if CommandLine.arguments.contains("--check-resampler") { ResamplerProbe.run() }
+        if let i = CommandLine.arguments.firstIndex(of: "--mic-watch") {
+            let args = CommandLine.arguments
+            MicWatch.run(seconds: i + 1 < args.count ? Int(args[i + 1]) ?? 14 : 14)
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--ask"),
+           i + 1 < CommandLine.arguments.count {
+            let args = CommandLine.arguments
+            let title = args.firstIndex(of: "--meeting").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            AskTest.run(question: args[i + 1], titleMatch: title)
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--search"),
+           i + 1 < CommandLine.arguments.count {
+            SearchTest.run(query: CommandLine.arguments[i + 1])
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--render-menu"),
            i + 1 < CommandLine.arguments.count {
             MenuPreview.run(directory: CommandLine.arguments[i + 1])
@@ -60,6 +75,16 @@ struct ScribeApp: App {
         .defaultSize(width: 1040, height: 720)
         .commands {
             CommandGroup(replacing: .newItem) { }
+            CommandGroup(after: .textEditing) {
+                Button("Find…") { SearchCoordinator.shared.find() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("Find in All Meetings…") { SearchCoordinator.shared.searchAll() }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("Find Next") { SearchCoordinator.shared.next() }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button("Find Previous") { SearchCoordinator.shared.previous() }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
         }
 
         SwiftUI.Settings {

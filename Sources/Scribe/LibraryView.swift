@@ -7,6 +7,7 @@ import SwiftUI
 /// meeting.
 enum LibrarySelection: Hashable {
     case actions
+    case search
     case meeting(Meeting.ID)
 }
 
@@ -14,7 +15,10 @@ enum LibrarySelection: Hashable {
 /// from an action item to where it was agreed.
 struct PendingSeek: Equatable {
     let meeting: Meeting.ID
-    let time: TimeInterval
+    /// Where to start playing, when the hit has a place in the recording.
+    let time: TimeInterval?
+    /// Which view to scroll to. Notes hits have one of these and no time.
+    var scrollID: String? = nil
 }
 
 struct LibraryView: View {
@@ -23,11 +27,14 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var pendingSeek: PendingSeek?
     @ObservedObject private var navigator = LibraryNavigator.shared
+    @ObservedObject private var search = SearchCoordinator.shared
 
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section {
+                    Label("Search", systemImage: "magnifyingglass")
+                        .tag(LibrarySelection.search)
                     Label("All actions", systemImage: "checklist")
                         .badge(library.meetings.reduce(0) { $0 + $1.openActionCount })
                         .tag(LibrarySelection.actions)
@@ -60,6 +67,11 @@ struct LibraryView: View {
                     pendingSeek = seek
                     selection = .meeting(seek.meeting)
                 }
+            case .search:
+                SearchResultsView(focusRequests: search.searchAllRequests) { seek in
+                    pendingSeek = seek
+                    selection = .meeting(seek.meeting)
+                }
             case .meeting(let id):
                 if let meeting = library.meetings.first(where: { $0.id == id }) {
                     MeetingDetailView(meeting: meeting, pendingSeek: $pendingSeek)
@@ -79,6 +91,7 @@ struct LibraryView: View {
             consumeNavigationRequest()
         }
         .onChange(of: navigator.request) { _, _ in consumeNavigationRequest() }
+        .onChange(of: search.searchAllRequests) { _, _ in selection = .search }
     }
 
     /// Honours a request from the menu bar to show a particular meeting.
@@ -184,11 +197,18 @@ struct MeetingDetailView: View {
     @StateObject private var player = AudioPlayer()
     @State private var draft: Meeting
     @State private var isEditing = false
-    @State private var transcriptQuery = ""
+    @ObservedObject private var search = SearchCoordinator.shared
+    @State private var findVisible = false
+    @State private var findQuery = ""
+    @State private var findIndex = 0
+    @State private var findHits: [SearchHit] = []
+    @State private var filterTranscript = false
+    @FocusState private var findFocused: Bool
     @State private var speakerFilter: Speaker?
     @State private var confirmingDelete = false
     @State private var jumpRequest: TimeInterval?
     @State private var confirmingRegenerate = false
+    @State private var chatVisible = false
 
     init(meeting: Meeting, pendingSeek: Binding<PendingSeek?>) {
         self.meeting = meeting
@@ -202,10 +222,13 @@ struct MeetingDetailView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     header
                     if player.isLoaded { PlayerBar(player: player) }
-                    summarySection
+                    summarySection.id(ScrollID.summary)
                     actionSection
                     ForEach($draft.sections) { $section in
-                        NoteSectionView(section: $section, isEditing: isEditing)
+                        NoteSectionView(section: $section,
+                                        isEditing: isEditing,
+                                        highlight: highlightText)
+                            .id(ScrollID.section(section.id))
                     }
                     transcriptSection
                 }
@@ -213,6 +236,8 @@ struct MeetingDetailView: View {
                 .frame(maxWidth: 780, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .onChange(of: findIndex) { _, _ in scrollToHit(proxy) }
+            .onChange(of: findHits) { _, _ in scrollToHit(proxy) }
             .onAppear { consumePendingSeek(proxy) }
             .onChange(of: pendingSeek) { _, _ in consumePendingSeek(proxy) }
             .onChange(of: jumpRequest) { _, request in
@@ -221,8 +246,20 @@ struct MeetingDetailView: View {
                 play(from: request, using: proxy)
             }
         }
+        .inspector(isPresented: $chatVisible) {
+            MeetingChatView(meeting: draft)
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 480)
+        }
+        .safeAreaInset(edge: .top) {
+            if findVisible { findBar }
+        }
+        .onChange(of: findQuery) { _, _ in refreshHits(resetPosition: true) }
+        .onChange(of: draft) { _, _ in refreshHits(resetPosition: false) }
+        .onChange(of: search.findRequests) { _, _ in openFind() }
+        .onChange(of: search.nextRequests) { _, _ in step(by: 1) }
+        .onChange(of: search.previousRequests) { _, _ in step(by: -1) }
         .toolbar { toolbarContent }
-        .onAppear { player.load(library.audioURL(for: meeting)) }
+        .onAppear { player.load(library.audioURL(for: meeting), title: meeting.title) }
         .onDisappear { player.stop() }
         // Notes can change underneath this view — a retry finishing, an action
         // ticked in the Actions view — so follow the library unless mid-edit.
@@ -347,7 +384,7 @@ struct MeetingDetailView: View {
                     Text("No summary.").foregroundStyle(.secondary)
                 }
             } else {
-                MarkdownText(draft.summary)
+                MarkdownText(draft.summary, highlight: highlightText)
             }
         }
     }
@@ -378,6 +415,8 @@ struct MeetingDetailView: View {
             } else {
                 ForEach($draft.actionItems) { $item in
                     ActionItemRow(item: $item,
+                                  highlight: highlightText,
+                                  isFindMatch: currentHit?.scrollID == ScrollID.action(item.id),
                                   isEditing: isEditing,
                                   canPlay: player.isLoaded) {
                         draft.actionItems.removeAll { $0.id == item.id }
@@ -390,6 +429,89 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: Find
+
+    /// Text to highlight everywhere in the meeting. Empty unless the bar is up,
+    /// so closing it clears the yellow without clearing what you typed.
+    private var highlightText: String { findVisible ? findQuery : "" }
+
+    private var currentHit: SearchHit? {
+        findHits.indices.contains(findIndex) ? findHits[findIndex] : nil
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+
+            TextField("Find in this meeting", text: $findQuery)
+                .textFieldStyle(.plain)
+                .focused($findFocused)
+                .onSubmit { step(by: 1) }
+
+            if !findQuery.isEmpty {
+                Text(findHits.isEmpty ? "No results" : "\(findIndex + 1) of \(findHits.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+            }
+
+            Button { step(by: -1) } label: { Image(systemName: "chevron.up") }
+                .disabled(findHits.isEmpty)
+                .help("Previous match")
+            Button { step(by: 1) } label: { Image(systemName: "chevron.down") }
+                .disabled(findHits.isEmpty)
+                .help("Next match")
+
+            Toggle(isOn: $filterTranscript) {
+                Image(systemName: "line.3.horizontal.decrease")
+            }
+            .toggleStyle(.button)
+            .help("Show only matching transcript lines")
+
+            Button("Done") { closeFind() }
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+        .onExitCommand { closeFind() }
+    }
+
+    private func openFind() {
+        findVisible = true
+        refreshHits(resetPosition: true)
+        findFocused = true
+    }
+
+    private func closeFind() {
+        findVisible = false
+        findFocused = false
+        filterTranscript = false
+    }
+
+    private func refreshHits(resetPosition: Bool) {
+        guard findVisible else {
+            findHits = []
+            return
+        }
+        findHits = MeetingSearch.hits(in: draft, query: findQuery)
+        if resetPosition || findIndex >= findHits.count { findIndex = 0 }
+    }
+
+    private func step(by delta: Int) {
+        guard !findHits.isEmpty else { return }
+        // Wrap, the way a find bar is expected to.
+        findIndex = (findIndex + delta + findHits.count) % findHits.count
+    }
+
+    private func scrollToHit(_ proxy: ScrollViewProxy) {
+        guard findVisible, let hit = currentHit else { return }
+        // A filtered transcript can be hiding the very line we are jumping to.
+        if case .transcript = hit.field { speakerFilter = nil }
+        withAnimation { proxy.scrollTo(hit.scrollID, anchor: .center) }
     }
 
     // MARK: Transcript
@@ -409,9 +531,6 @@ struct MeetingDetailView: View {
                 .labelsHidden()
             }
 
-            TextField("Find in transcript", text: $transcriptQuery)
-                .textFieldStyle(.roundedBorder)
-
             if visibleUtterances.isEmpty {
                 Text(draft.utterances.isEmpty ? "No transcript was captured." : "No lines match.")
                     .foregroundStyle(.secondary)
@@ -420,8 +539,9 @@ struct MeetingDetailView: View {
                     ForEach(visibleUtterances) { utterance in
                         TranscriptLine(utterance: utterance,
                                        isCurrent: isCurrent(utterance),
+                                       isFindMatch: currentHit?.scrollID == utterance.id,
                                        canPlay: player.isLoaded,
-                                       highlight: transcriptQuery) {
+                                       highlight: highlightText) {
                             player.play(from: utterance.start)
                         }
                         .id(utterance.id)
@@ -432,7 +552,9 @@ struct MeetingDetailView: View {
     }
 
     private var visibleUtterances: [Utterance] {
-        let needle = transcriptQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        let needle = (findVisible && filterTranscript)
+            ? findQuery.trimmingCharacters(in: .whitespaces).lowercased()
+            : ""
         return draft.utterances.filter { utterance in
             (speakerFilter == nil || utterance.speaker == speakerFilter)
                 && (needle.isEmpty || utterance.text.lowercased().contains(needle))
@@ -444,14 +566,24 @@ struct MeetingDetailView: View {
     private func consumePendingSeek(_ proxy: ScrollViewProxy) {
         guard let seek = pendingSeek, seek.meeting == meeting.id else { return }
         pendingSeek = nil
-        play(from: seek.time, using: proxy)
+
+        if let time = seek.time {
+            play(from: time, using: proxy)
+            return
+        }
+        guard let scrollID = seek.scrollID else { return }
+        // Notes are laid out before the transcript, but the window may still be
+        // settling when this runs.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation { proxy.scrollTo(scrollID, anchor: .center) }
+        }
     }
 
     private func play(from time: TimeInterval, using proxy: ScrollViewProxy) {
         // Clear the filters, or the line we are scrolling to may not be on
         // screen at all.
         speakerFilter = nil
-        transcriptQuery = ""
+        filterTranscript = false
 
         guard let target = draft.utterances.min(by: {
             abs($0.start - time) < abs($1.start - time)
@@ -473,6 +605,16 @@ struct MeetingDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup {
+            Button { openFind() } label: {
+                Label("Find", systemImage: "magnifyingglass")
+            }
+            .help("Find in this meeting (⌘F)")
+
+            Button { chatVisible.toggle() } label: {
+                Label("Ask", systemImage: "bubble.left.and.text.bubble.right")
+            }
+            .help("Ask the local model about this meeting")
+
             Button {
                 if isEditing { save() }
                 isEditing.toggle()
@@ -544,6 +686,8 @@ private struct SectionHeading: View {
 
 private struct ActionItemRow: View {
     @Binding var item: ActionItem
+    let highlight: String
+    let isFindMatch: Bool
     let isEditing: Bool
     let canPlay: Bool
     let onDelete: () -> Void
@@ -566,12 +710,14 @@ private struct ActionItemRow: View {
                 .buttonStyle(.borderless)
             } else {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(item.text)
+                    Text(AttributedString.highlighting(item.text, highlight))
                         .strikethrough(item.done, color: .secondary)
                         .foregroundStyle(item.done ? .secondary : .primary)
                         .naturalDirection(for: item.text)
                     if !item.owner.isEmpty {
-                        Text(item.owner).font(.caption).foregroundStyle(.secondary)
+                        Text(AttributedString.highlighting(item.owner, highlight))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -588,12 +734,22 @@ private struct ActionItemRow: View {
             }
         }
         .padding(.vertical, 3)
+        .padding(.horizontal, 4)
+        .background(isFindMatch ? Color.accentColor.opacity(0.08) : .clear,
+                    in: RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            if isFindMatch {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1.5)
+            }
+        }
     }
 }
 
 private struct NoteSectionView: View {
     @Binding var section: NoteSection
     let isEditing: Bool
+    var highlight: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -605,7 +761,7 @@ private struct NoteSectionView: View {
                     .padding(6)
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
             } else {
-                MarkdownText(section.body)
+                MarkdownText(section.body, highlight: highlight)
             }
         }
     }
@@ -614,6 +770,7 @@ private struct NoteSectionView: View {
 private struct TranscriptLine: View {
     let utterance: Utterance
     let isCurrent: Bool
+    let isFindMatch: Bool
     let canPlay: Bool
     let highlight: String
     let onPlay: () -> Void
@@ -643,21 +800,25 @@ private struct TranscriptLine: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(isCurrent ? Color.accentColor.opacity(0.14) : .clear,
-                    in: RoundedRectangle(cornerRadius: 5))
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            // The line the find bar is sitting on, as distinct from the many
+            // lines that merely contain the word.
+            if isFindMatch {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1.5)
+            }
+        }
+    }
+
+    private var rowBackground: Color {
+        if isCurrent { return Color.accentColor.opacity(0.14) }
+        if isFindMatch { return Color.accentColor.opacity(0.08) }
+        return .clear
     }
 
     private var attributed: AttributedString {
-        var text = AttributedString(utterance.text)
-        let needle = highlight.trimmingCharacters(in: .whitespaces)
-        guard !needle.isEmpty else { return text }
-        var search = text.startIndex..<text.endIndex
-        while let found = text[search].range(of: needle, options: .caseInsensitive) {
-            text[found].backgroundColor = .yellow.opacity(0.45)
-            guard found.upperBound < text.endIndex else { break }
-            search = found.upperBound..<text.endIndex
-        }
-        return text
+        .highlighting(utterance.text, highlight)
     }
 }
 
@@ -694,7 +855,12 @@ private struct PlayerBar: View {
 /// Renders the model's markdown bullets as actual bullets, with inline emphasis.
 private struct MarkdownText: View {
     let source: String
-    init(_ source: String) { self.source = source }
+    let highlight: String
+
+    init(_ source: String, highlight: String = "") {
+        self.source = source
+        self.highlight = highlight
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -729,6 +895,6 @@ private struct MarkdownText: View {
     }
 
     private func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text)) ?? AttributedString(text)
+        .highlighting(text, highlight, markdown: true)
     }
 }

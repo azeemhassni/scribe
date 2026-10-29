@@ -14,3 +14,25 @@ final class LibraryNavigator: ObservableObject {
 
     private init() {}
 }
+
+
+/// Carries the find commands from the menu to whichever view can answer them.
+///
+/// Counters rather than flags: pressing ⌘F twice in a row has to register
+/// twice, and a Bool that is already true says nothing the second time.
+@MainActor
+final class SearchCoordinator: ObservableObject {
+    static let shared = SearchCoordinator()
+
+    @Published private(set) var findRequests = 0
+    @Published private(set) var searchAllRequests = 0
+    @Published private(set) var nextRequests = 0
+    @Published private(set) var previousRequests = 0
+
+    private init() {}
+
+    func find() { findRequests += 1 }
+    func searchAll() { searchAllRequests += 1 }
+    func next() { nextRequests += 1 }
+    func previous() { previousRequests += 1 }
+}
