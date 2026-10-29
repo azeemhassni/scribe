@@ -26,8 +26,23 @@ if [ "$DRY_RUN" != "--dry-run" ]; then
   git rev-parse "$TAG" >/dev/null 2>&1 && fail "$TAG already exists"
   gh auth status >/dev/null 2>&1 || fail "gh is not logged in"
 fi
-xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1 \
-  || fail "notarytool profile '$PROFILE' not found (see the top of this script)"
+# Report what notarytool actually said. Swallowing it turns an expired Apple
+# agreement, a revoked password and a genuinely missing profile into the same
+# wrong message, and each needs a different fix.
+if ! NOTARY_CHECK="$(xcrun notarytool history --keychain-profile "$PROFILE" 2>&1)"; then
+  echo "error: notarytool could not use the keychain profile '$PROFILE'" >&2
+  echo "$NOTARY_CHECK" | sed 's/^/  /' >&2
+  case "$NOTARY_CHECK" in
+    *"agreement"*)
+      echo "  -> Sign in at https://developer.apple.com/account and accept the" >&2
+      echo "     updated agreement under Membership, then run this again." >&2
+      ;;
+    *"not find"*|*"No keychain profile"*)
+      echo "  -> Create it with the notarytool command at the top of this script." >&2
+      ;;
+  esac
+  exit 1
+fi
 
 echo "==> Building $VERSION"
 SCRIBE_VERSION="$VERSION" scripts/bundle.sh
