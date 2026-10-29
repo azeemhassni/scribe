@@ -20,6 +20,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
+                .linkedFramework("MediaPlayer"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("AppKit"),
             ]
