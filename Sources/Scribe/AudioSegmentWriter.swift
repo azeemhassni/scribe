@@ -9,17 +9,47 @@ final class Resampler {
                                             interleaved: true)!
 
     private let converter: AVAudioConverter
+    /// Set when the input carries more than one channel and has to be folded to
+    /// mono before the converter sees it.
+    private let monoFormat: AVAudioFormat?
 
     init?(from inputFormat: AVAudioFormat) {
-        guard let converter = AVAudioConverter(from: inputFormat, to: Self.targetFormat) else { return nil }
-        converter.downmix = true
-        self.converter = converter
+        // AVAudioConverter only knows how to downmix channel layouts it
+        // recognises. Hand it a device with a discrete layout — which is what an
+        // aggregate device reports, and a WhatsApp call leaves one as the
+        // default input — and it returns a full buffer of zeros: no error, the
+        // expected frame count, pure silence, so nothing downstream notices
+        // until the meeting is over. Folding the channels here leaves the
+        // converter with nothing but sample-rate work, which it does for any
+        // input.
+        if inputFormat.channelCount > 1 {
+            guard let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                           sampleRate: inputFormat.sampleRate,
+                                           channels: 1,
+                                           interleaved: false),
+                  let converter = AVAudioConverter(from: mono, to: Self.targetFormat) else { return nil }
+            self.monoFormat = mono
+            self.converter = converter
+        } else {
+            guard let converter = AVAudioConverter(from: inputFormat, to: Self.targetFormat) else { return nil }
+            self.monoFormat = nil
+            self.converter = converter
+        }
     }
 
     func convert(_ input: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard input.frameLength > 0 else { return nil }
-        let ratio = Self.targetFormat.sampleRate / input.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 1024
+
+        let source: AVAudioPCMBuffer
+        if let monoFormat {
+            guard let folded = Self.foldToMono(input, as: monoFormat) else { return nil }
+            source = folded
+        } else {
+            source = input
+        }
+
+        let ratio = Self.targetFormat.sampleRate / source.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(source.frameLength) * ratio) + 1024
         guard let output = AVAudioPCMBuffer(pcmFormat: Self.targetFormat, frameCapacity: capacity) else { return nil }
 
         var supplied = false
@@ -31,9 +61,45 @@ final class Resampler {
             }
             supplied = true
             status.pointee = .haveData
-            return input
+            return source
         }
         guard error == nil, output.frameLength > 0 else { return nil }
+        return output
+    }
+
+    /// Averages every channel into one — the same thing AVAudioConverter does
+    /// for the layouts it does understand, so the stereo and mono devices that
+    /// already worked keep sounding exactly as they did.
+    private static func foldToMono(_ buffer: AVAudioPCMBuffer, as format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frames = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        guard frames > 0, channels > 0,
+              let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: buffer.frameLength),
+              let target = output.floatChannelData else { return nil }
+        output.frameLength = buffer.frameLength
+
+        // Interleaved buffers expose one pointer holding frame-major samples;
+        // deinterleaved ones expose a pointer per channel.
+        let interleaved = buffer.format.isInterleaved
+        let sample: (Int, Int) -> Float
+        if let data = buffer.floatChannelData {
+            sample = interleaved ? { data[0][$0 * channels + $1] } : { data[$1][$0] }
+        } else if let data = buffer.int16ChannelData {
+            let full = Float(Int16.max)
+            sample = interleaved ? { Float(data[0][$0 * channels + $1]) / full } : { Float(data[$1][$0]) / full }
+        } else if let data = buffer.int32ChannelData {
+            let full = Float(Int32.max)
+            sample = interleaved ? { Float(data[0][$0 * channels + $1]) / full } : { Float(data[$1][$0]) / full }
+        } else {
+            return nil
+        }
+
+        let scale = 1 / Float(channels)
+        for frame in 0..<frames {
+            var sum: Float = 0
+            for channel in 0..<channels { sum += sample(frame, channel) }
+            target[0][frame] = sum * scale
+        }
         return output
     }
 }
