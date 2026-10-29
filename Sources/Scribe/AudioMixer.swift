@@ -18,6 +18,17 @@ enum AudioMixer {
         AVEncoderBitRateKey: 32_000,
     ]
 
+    /// Speech level each stream is brought to before the streams are summed,
+    /// as RMS of full scale — about -20 dBFS, which leaves room for the two
+    /// sides to land on top of each other without the sum clipping.
+    private static let targetLevel: Float = 0.1
+    /// A stream is never lifted so far that its loud moments crowd full scale.
+    private static let peakCeiling: Float = 0.7
+    private static let gainRange: ClosedRange<Float> = 0.25...12
+    /// Below this a stream holds no speech at all, only room tone or a dead
+    /// capture; amplifying that would just make the hiss loud.
+    private static let speechFloor: Float = 0.002
+
     @discardableResult
     static func mix(_ inputs: [URL], to destination: URL) throws -> URL? {
         let files = inputs.compactMap { url -> AVAudioFile? in
@@ -25,6 +36,13 @@ enum AudioMixer {
             return try? AVAudioFile(forReading: url)
         }
         guard !files.isEmpty else { return nil }
+
+        // Conferencing apps run their output through automatic gain control, so
+        // the remote side always arrives at a healthy, consistent level. A
+        // laptop microphone gets no such treatment and lands 10-13 dB quieter.
+        // Summed raw, you are a faint voice in your own recording, so measure
+        // each stream and match them before mixing.
+        let sources = files.map { (file: $0, gain: gain(for: $0)) }
 
         let output = try AVAudioFile(forWriting: destination, settings: outputSettings)
         let format = output.processingFormat
@@ -39,13 +57,13 @@ enum AudioMixer {
             mixed.frameLength = frames
             memset(target[0], 0, Int(frames) * MemoryLayout<Float>.size)
 
-            for file in files where file.framePosition < file.length {
-                guard let scratch = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+            for source in sources where source.file.framePosition < source.file.length {
+                guard let scratch = AVAudioPCMBuffer(pcmFormat: source.file.processingFormat,
                                                      frameCapacity: frames) else { continue }
-                try file.read(into: scratch, frameCount: frames)
-                guard let source = scratch.floatChannelData else { continue }
+                try source.file.read(into: scratch, frameCount: frames)
+                guard let samples = scratch.floatChannelData else { continue }
                 for i in 0..<Int(scratch.frameLength) {
-                    target[0][i] += source[0][i]
+                    target[0][i] += samples[0][i] * source.gain
                 }
             }
 
@@ -58,5 +76,65 @@ enum AudioMixer {
             position += AVAudioFramePosition(frames)
         }
         return destination
+    }
+
+    /// How much this stream has to be lifted (or held back) to sit at the same
+    /// level as the other side of the call.
+    private static func gain(for file: AVAudioFile) -> Float {
+        defer { file.framePosition = 0 }
+        guard let profile = profile(file), profile.speech > speechFloor else { return 1 }
+        var gain = targetLevel / profile.speech
+        if profile.peak > 0 { gain = min(gain, peakCeiling / profile.peak) }
+        gain = min(max(gain, gainRange.lowerBound), gainRange.upperBound)
+        Log.info(String(format: "mixing %@ at %+.1f dB (speech %.1f dBFS)",
+                        file.url.lastPathComponent,
+                        20 * log10(gain),
+                        20 * log10(profile.speech)))
+        return gain
+    }
+
+    /// Measures how loud a stream is *when someone is talking*. A plain average
+    /// over the whole file would mostly measure the silence between turns, and
+    /// so would read a stream quieter the less its owner said.
+    private static func profile(_ file: AVAudioFile) -> (speech: Float, peak: Float)? {
+        let format = file.processingFormat
+        let window = AVAudioFrameCount(format.sampleRate * 0.02)   // 20 ms
+        guard window > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: window) else { return nil }
+
+        var levels: [Float] = []
+        var peaks: [Float] = []
+        file.framePosition = 0
+        while file.framePosition < file.length {
+            let frames = AVAudioFrameCount(min(AVAudioFramePosition(window), file.length - file.framePosition))
+            guard (try? file.read(into: buffer, frameCount: frames)) != nil,
+                  buffer.frameLength > 0, let samples = buffer.floatChannelData else { break }
+            var energy: Float = 0
+            var peak: Float = 0
+            for i in 0..<Int(buffer.frameLength) {
+                let sample = samples[0][i]
+                energy += sample * sample
+                peak = max(peak, abs(sample))
+            }
+            levels.append((energy / Float(buffer.frameLength)).squareRoot())
+            peaks.append(peak)
+        }
+
+        guard let loudest = levels.max(), loudest > 0 else { return nil }
+        // Anything within 20 dB of the loudest moment counts as speech; the
+        // gaps and the room tone fall below that.
+        let gate = loudest * 0.1
+        var energy: Float = 0
+        var count = 0
+        for level in levels where level > gate {
+            energy += level * level
+            count += 1
+        }
+        guard count > 0 else { return nil }
+
+        // A high percentile rather than the outright maximum, so one cough or
+        // a knocked desk cannot hold the whole stream down.
+        let sorted = peaks.sorted()
+        let peak = sorted[min(sorted.count - 1, Int(Float(sorted.count) * 0.995))]
+        return ((energy / Float(count)).squareRoot(), peak)
     }
 }
