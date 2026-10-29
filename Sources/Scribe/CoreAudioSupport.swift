@@ -72,6 +72,17 @@ enum CA {
         return out
     }
 
+    /// Human-readable name of the current default input device, for the log —
+    /// which device was live is the first thing you want to know when a
+    /// recording comes back silent.
+    static var defaultInputDeviceName: String? {
+        let device = value(AudioObjectID(kAudioObjectSystemObject),
+                           kAudioHardwarePropertyDefaultInputDevice,
+                           default: AudioDeviceID(kAudioObjectUnknown))
+        guard device != kAudioObjectUnknown else { return nil }
+        return string(device, kAudioObjectPropertyName)
+    }
+
     static var defaultOutputDeviceUID: String? {
         let device = value(AudioObjectID(kAudioObjectSystemObject),
                            kAudioHardwarePropertyDefaultOutputDevice,
