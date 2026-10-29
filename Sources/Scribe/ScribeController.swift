@@ -32,6 +32,8 @@ final class ScribeController: ObservableObject {
     // MARK: - Startup
 
     func bootstrap() {
+        WindowPresence.begin()
+
         _ = AppUpdater.shared
         applyDetectorSettings()
 
