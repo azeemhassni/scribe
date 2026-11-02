@@ -10,8 +10,17 @@ cd "$(dirname "$0")/.."
 APP="build/Scribe.app"
 VERSION="${SCRIBE_VERSION:-}"
 
-swift build -c release --arch arm64
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/Scribe"
+# SwiftPM compiles Package.swift inside its own sandbox-exec, which cannot nest
+# inside Homebrew's build sandbox ("sandbox_apply: Operation not permitted"), so
+# the formula sets this to --disable-sandbox. Left empty everywhere else.
+SWIFT_BUILD=(swift build -c release --arch arm64)
+if [ -n "${SCRIBE_SWIFT_FLAGS:-}" ]; then
+  # shellcheck disable=SC2206 # deliberate word splitting: these are flags
+  SWIFT_BUILD+=($SCRIBE_SWIFT_FLAGS)
+fi
+
+"${SWIFT_BUILD[@]}"
+BIN="$("${SWIFT_BUILD[@]}" --show-bin-path)/Scribe"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
