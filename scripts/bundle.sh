@@ -37,12 +37,16 @@ fi
 IDENTITY="${SCRIBE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning \
   | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)}"
 
-if [ -n "$IDENTITY" ]; then
+if [ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ]; then
   # Notarization requires a secure timestamp and the hardened runtime on
   # every executable, nested ones first.
   SIGN=(codesign --force --options runtime --timestamp --sign "$IDENTITY")
 else
-  echo "No Developer ID identity found, signing ad-hoc." >&2
+  # Ad-hoc, and deliberately without the hardened runtime: library validation
+  # refuses to load an ad-hoc signed Sparkle.framework into an ad-hoc signed
+  # app ("different Team IDs"), so the app builds and signs cleanly and then
+  # will not launch at all.
+  echo "No Developer ID identity, signing ad-hoc." >&2
   SIGN=(codesign --force --sign -)
 fi
 FW="$APP/Contents/Frameworks/Sparkle.framework"
