@@ -212,13 +212,13 @@ final class SetupModel: ObservableObject {
     func installSpeechBinary() async {
         guard let brew = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            speechBinary = .failed("Homebrew not found. Install it from brew.sh, then run `brew install whisper-cpp`.")
+            speechBinary = .failed("Homebrew not found. Install it from brew.sh, then run `brew install whisper.cpp`.")
             return
         }
         speechBinary = .working("Installing whisper.cpp with Homebrew…", nil)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: brew)
-        process.arguments = ["install", "whisper-cpp"]
+        process.arguments = ["install", "whisper.cpp"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
