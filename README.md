@@ -7,20 +7,32 @@ Scribe notices when you join a call, records it, transcribes it and writes notes
 ## Requirements
 
 - macOS 26 or later on Apple Silicon
-- [Homebrew](https://brew.sh), for whisper.cpp
+- [Homebrew](https://brew.sh)
+- Xcode 26 or later, to compile Scribe
 - About 1 GB of disk for the speech model, plus a notes model:
   - [Ollama](https://ollama.com) with any chat model you already have, or
   - the built-in engine, which downloads a 2–9 GB model depending on your RAM
 
 ## Install
 
-1. Download `Scribe.zip` from [Releases](https://github.com/azeemhassni/scribe/releases/latest).
-2. Move `Scribe.app` to Applications and open it.
-3. Follow the setup window. It installs whisper.cpp, downloads models and asks for microphone access.
+```bash
+brew install azeemhassni/tap/scribe
+```
+
+Homebrew builds Scribe from source on your Mac and signs it there, which takes a few minutes. Spell out the full `azeemhassni/tap/scribe` name: Homebrew refuses to load a formula from a tap it has not been told to trust, and naming it in full on an `install` is what tells it. After that, `brew upgrade` works normally.
+
+Then put it where Spotlight and Launchpad can find it, and open it:
+
+```bash
+ln -sfn "$(brew --prefix scribe)/Scribe.app" /Applications/Scribe.app
+open /Applications/Scribe.app
+```
+
+Work through the setup window. It downloads the speech model, finds Ollama or fetches a built-in notes model, and asks for microphone access.
 
 Scribe lives in the menu bar. Turn on **Start Scribe at login** in Settings, or it can't detect meetings after a restart.
 
-Scribe checks for a new version once a day and asks before installing it. **Updates…** in the menu checks straight away.
+Updates come from `brew upgrade scribe`. Because each build is signed on your own Mac and macOS ties microphone access to the signature, an upgrade asks for microphone access again.
 
 ## How it works
 
@@ -72,22 +84,11 @@ Other command-line modes:
 scripts/release.sh 0.1.0
 ```
 
-Builds for Apple Silicon, notarizes, tags and publishes a GitHub release with `Scribe.zip` and `appcast.xml`. The release notes are the commit messages since the last tag.
+Builds the version to prove it compiles, tags it, publishes a GitHub release with the commit messages since the last tag as its notes, and points the formula in [azeemhassni/homebrew-tap](https://github.com/azeemhassni/homebrew-tap) at the new tag.
 
-It needs two things in your keychain:
+Scribe ships as source, so a release has no binary to notarize and nothing to sign for Sparkle. Every copy is compiled and signed on the Mac it runs on, which is also why Homebrew installs have Sparkle's own update check turned off.
 
-- A notarytool profile. See the top of `scripts/release.sh`.
-- The update signing key, created once with:
-
-  ```bash
-  .build/artifacts/sparkle/Sparkle/bin/generate_keys --account scribe
-  ```
-
-Installed copies only accept updates signed with this key. Back it up; if it is lost, existing users have to download the next version by hand:
-
-```bash
-.build/artifacts/sparkle/Sparkle/bin/generate_keys --account scribe -x scribe-update-key.txt
-```
+The script expects a checkout of the tap next to this one, at `~/Code/homebrew-tap`, or wherever `SCRIBE_TAP` points.
 
 ## License
 
